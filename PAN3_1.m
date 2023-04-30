@@ -1,65 +1,83 @@
 clear ,clc
 close all force
 
-
 %__________________________________________________________________________
 % условие задачи
-n = 5; % количество элементарных разбиений
+
+filter = true;%фильтр 
+n = 50; % количество элементарных разбиений
 Vn = 350 * 1000 / 3600; % начальная скорость в м/с
 Vk = 880 * 1000 / 3600; % конечная скорость в м/с
 Hn = 700; % начальная высота
 Hk = 8000; % конечная высота 
 massa = 47000; % масса ЛА кг
-S = 127; % площадь крыльев ЛА м^2
-Vtek = Vn; % текущая скорость для элементарной области 
-Htek = Hn; % текущая выоста для элементарной области 
-dH = (Hk - Hn) / n; %изменение высоты в элементарной области
-dV = (Vk - Vn) / n; %изменение скорости в элементарной области
-
+S = 127; % площадь крыла ЛА м^2
+Vtek = Vn; % текущая скорость 
+Htek = Hn; % текущая выоста  
+dH = (Hk - Hn) / n; 
+dV = (Vk - Vn) / n; 
 
 %__________________________________________________________________________
 %Разгон
+Vtek = Vn; 
+Htek = Hn;  
 for i = 1 : (n + 1) %"строка"
+     Vtek = Vn; 
      for j = 1 : n  %"столбец"
        Vtek = Vn + j * dV;
-       traz = Razgon(Htek, Vtek - dV, Vtek, massa, S);
+       traz = Razgon(Htek, Vtek - dV, Vtek, massa, S,filter);
        Tr(i, j) = traz;
      end 
      Htek = Hn + i * dH;
 end
 
 %Подъем
+Vtek = Vn;
+Htek = Hn;
 for i = 1 : n %"строка"
+    Vtek = Vn;      
     Htek = Hn + i * dH;
     for j = 1 : (n + 1)  %"столбец"
-        tnab = Podyem(Htek - dH, Htek, Vtek, massa, S);
+        tnab = Podyem(Htek - dH, Htek, Vtek, massa, S,filter);
         Vtek = Vn + j * dV;
         Tp(i, j) = tnab;
     end 
 end
 
-%Разгон+подъем
+%Разгон+подъем 
+Htek = Hn; 
 for i = 1 : n %"строка"
+    Vtek = Vn; 
     Htek = Hn + i * dH;
     for j = 1 : n %"столбец"
         Vtek = Vn + j * dV;
-        tpodraz = PodyemRazgon(Htek - dH, Htek, Vtek - dV, Vtek, massa, S);
+        tpodraz = PodyemRazgon(Htek - dH, Htek, Vtek - dV, Vtek, massa, S,filter);
         Tpr(i, j) = tpodraz;
     end 
 end
 %__________________________________________________________________________
+ %disp('Разгон')
+ % disp(Tr)
+ % disp('Подъем')
+ %disp(Tp)
+ %disp('Разгон-Подъем')
+ % disp(Tpr)
+% %__________________________________________________________________________
+
+%__________________________________________________________________________
+
 % создание сетки минимального времени
 s_time(n + 1, n + 1) = 0;
 % 1 - разгон 2 - подем 3 - разгон-подъем 
 s_direction(n + 1, n + 1) = 0;
 
-% заполнение при Нmax
+% заполнение крайней верхней строки
 for j = n : - 1 : 1
     s_time(n + 1, j) = s_time(n + 1, j + 1) + Tr(n, j);
     s_direction(n + 1, j) = 1;
 end
 
-% заполнение при Vmax
+% заполнение крайнего правого столбца
 for i = n : - 1 : 1
     s_time(i, n + 1) = s_time(i + 1, n + 1) + Tp(i, n + 1);
     s_direction(i, n + 1) = 2;
@@ -78,10 +96,11 @@ for i = n : - 1 : 1
                 s_time(i, j) = s_time(i, j + 1) + Tr(i, j);
                 s_direction(i, j) = 1;
             end
-        end
+       end
     end
 end
-disp(s_time)
+%disp('сеть времени')
+%disp(s_time)
 
 % построение графика оптимальных маневров
 Vn = 350;
@@ -124,18 +143,10 @@ plot(V_optimal, H_optimal, 'b-s');
 grid on
 %__________________________________________________________________________
 
-disp('Разгон')
-disp(Tr)
-disp('Подъем')
-disp(Tp)
-disp('Разгон-Подъем')
-disp(Tpr)
-%__________________________________________________________________________
-
 %Построение оптимальной траектории
 
 %__________________________________________________________________________
-function tRazgon = Razgon(H, V1, V2, massa, S) 
+function tRazgon = Razgon(H, V1, V2, massa, S,filter) 
 % определение времени в области разгон
 
     H = H; % Средняя высота
@@ -144,7 +155,7 @@ function tRazgon = Razgon(H, V1, V2, massa, S)
     V = (V1 + V2) / 2; % Средняя скорость
     M = V / a; % число маха
     P = func_P(M); % тяга двигателя в Н
-    g = 9.8066; % Ускорение свободного падения м/c/c
+    g = calculate_gravity(H); % Ускорение свободного падения м/c/c
     % Расчет угла атаки
     Cy0 = 0.1143;   % Cy = 0.0723*alpha+0.1143;
     Cya = 0.0723;
@@ -154,19 +165,22 @@ function tRazgon = Razgon(H, V1, V2, massa, S)
     Cx = func_cx(alpha);
 
     % время разгона
-    tRazgon = abs((massa*(V2-V1))./(P.*cos(alpha)-Cx.*((V^2*ro)/2)*S)); 
+    tRazgon =(massa*(V2-V1))./(P.*cos(alpha/57.3)-Cx.*((V^2*ro)/2)*S);
+    if ((tRazgon< 0) && filter)
+     tRazgon = 100000000; % запретная область
+    end
 
 end
 
 % определение времени в области подъем
-function tPodyem = Podyem(H1,H2,V,massa,S)
+function tPodyem = Podyem(H1,H2,V,massa,S,filter)
 
     H = (H1 + H2) / 2; % Средняя высота
     a = func_a(H); % Скорость звука
     ro = func_ro(H); % Плотность
     M = V / a; % число маха
     P = func_P(M); % тяга двигателя в Н
-    g = 9.8066; % Ускорение свободного падения м/c/c
+    g = calculate_gravity(H); % Ускорение свободного падения м/c/c
 
     %Расчет угла атаки
     Cy0 = 0.1143;   % Cy = 0.0723*alpha+0.1143;
@@ -174,18 +188,19 @@ function tPodyem = Podyem(H1,H2,V,massa,S)
     alpha = (massa*g-Cy0*(ro*V.^2)/2*S)./(P/57.3+Cya*(ro*V.^2)/2*S);
     % коэффициент продольной силы
     Cx = func_cx(alpha);
+    X = Cx * ro * V .^ 2 / 2 * S;
 
-    teta = ((P - Cx * ro * V .^ 2 / 2 * S) * 57.3) / (massa * g);  
-
-    % время подъема
-    tPodyem = abs((57.3 * (H2 - H1) / (V * teta))); 
-
-
+    teta = ((P - X) * 57.3) / (massa * g);
+    % время подъема89
+    tPodyem = ((57.3 * (H2 - H1) / (V * teta))); 
+    if ((tPodyem<0) && filter)
+    tPodyem = 100000000; % запретная область
+    end
 
 end
 
 % определение времени в  области подъем-разгон
-function tPodyemRazgon = PodyemRazgon(H1,H2,V1,V2,massa,S)
+function tPodyemRazgon = PodyemRazgon(H1,H2,V1,V2,massa,S,filter)
 
     H = (H1 + H2) / 2; % Средняя высота
     a = func_a(H); % Скорость звука
@@ -193,20 +208,22 @@ function tPodyemRazgon = PodyemRazgon(H1,H2,V1,V2,massa,S)
     V = (V1 + V2) / 2; % Средняя скорость
     M = V / a; % число маха
     P = func_P(M); % тяга двигателя в Н
-    g = 9.8066; % Ускорение свободного падения м/c/c
+    g = calculate_gravity(H); % Ускорение свободного падения м/c/c
 
     % Расчет угла атаки
     Cy0 = 0.1143;   % Cy = 0.0723*alpha+0.1143;
     Cya = 0.0723;
     alpha = (massa*g-Cy0*(ro*V^2)/2*S)/(P/57.3+Cya*(ro*V^2)/2*S);
-
     % коэффициент продольной силы
     Cx = func_cx(alpha);
-    k = (V1 - V2)/(H2 - H1);
-    sin_teta = (P * cos(alpha) - Cx * ro * V .^2 / 2 * S) / (massa * (k * V + g));
+    k = (V2 - V1)/(H2 - H1);
+    X = Cx * ro * V .^2 / 2 * S; 
+    teta = (P * cos(alpha/57.3) - X) / (massa * (k * V + g));
     % время подъем-разгон
-    tPodyemRazgon = abs(( 1 / (k * sin_teta) * log(V2 / V1))) ; 
-
+    tPodyemRazgon = (( 1 / (k * teta) * log(V2 / V1))) ;
+    if ((tPodyemRazgon < 0) && filter)
+    tPodyemRazgon = 100000000; % запретная область
+    end
 
 end
 
@@ -227,10 +244,19 @@ res =  -0.0002 *alpha.^3+0.0079*alpha.^2+0.0070*alpha+0.2001;
 end
 
 function res = func_cx(alpha)
-res =  0.0004 *alpha.^3 - 0.0055*alpha.^2 + 0.0694*alpha + 0.0220;
+res =   0.0004 *alpha.^2 + 0.0015*alpha + 0.0312;
 end
 
 function res = func_P(M)
-res = 2.6146*10^3*M.^3 - 5.2416*10^3*M.^2 + 2.1611*10^3*M + 4.9096*10^3;
+res = 2*9.8066*(2.6146*10^3*M.^3 - 5.2416*10^3*M.^2 + 2.1611*10^3*M + 4.9096*10^3);
 end 
+
+function g = calculate_gravity(H)
+    a3 = -3.4485e-14;
+    a2 = 6.4749e-10;
+    a1 = -4.4214e-06;
+    a0 = 9.8051;
+    
+    g = a3 * H^3 + a2 * H^2 + a1 * H + a0;
+end
 
